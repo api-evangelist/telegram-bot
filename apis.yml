@@ -4,7 +4,7 @@ description: "Simplified HTTP version of the MTProto API for bots"
 url: https://core.telegram.org/bots/api
 specificationVersion: '0.20'
 created: '2026-05-28'
-modified: '2026-05-28'
+modified: '2026-05-29'
 x-source: public-apis/public-apis
 x-category: "Social"
 x-tier: 3
@@ -22,6 +22,13 @@ apis:
     properties:
       - type: Documentation
         url: https://core.telegram.org/bots/api
+      - type: AsyncAPI
+        url: asyncapi.yaml
+        x-version: '2.6.0'
+        x-description: >-
+          AsyncAPI 2.6 description of the Telegram Bot API Update delivery
+          surface: HTTPS long-poll via getUpdates and HTTPS webhook
+          delivery via setWebhook, with all 23 documented Update fields.
 common:
   - type: Website
     url: https://core.telegram.org/bots/api

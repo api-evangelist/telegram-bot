@@ -1,0 +1,659 @@
+asyncapi: '2.6.0'
+id: 'urn:telegram:bot-api:updates'
+info:
+  title: Telegram Bot API - Updates
+  version: '8.0'
+  description: |
+    AsyncAPI 2.6 description of how a Telegram Bot receives Update objects from
+    the Bot API. Two mutually exclusive delivery modes are modeled:
+
+      1. HTTPS long polling via the `getUpdates` method. The bot opens an
+         HTTPS request to `https://api.telegram.org/bot<token>/getUpdates` and
+         the server holds the connection open up to `timeout` seconds, then
+         responds with an array of Update objects.
+      2. HTTPS webhook delivery configured with `setWebhook`. Telegram
+         POSTs a single JSON-serialized Update object to the bot's HTTPS
+         endpoint for every event.
+
+    These two modes cannot be used simultaneously: calling `setWebhook`
+    disables `getUpdates`, and passing an empty `url` to `setWebhook`
+    re-enables `getUpdates`.
+
+    Source of truth: https://core.telegram.org/bots/api
+  contact:
+    name: Telegram Bot API
+    url: https://core.telegram.org/bots/api
+  license:
+    name: Telegram Bot API Terms
+    url: https://telegram.org/tos/bot-developers
+  x-source-url: https://core.telegram.org/bots/api
+  x-source-fetched-at: '2026-05-29'
+
+defaultContentType: application/json
+
+servers:
+  telegram-api:
+    url: api.telegram.org
+    protocol: https
+    description: |
+      Telegram Bot API endpoint used by the bot for outbound HTTPS calls,
+      including the `getUpdates` long-poll method.
+    security:
+      - botToken: []
+  bot-webhook:
+    url: '{webhookHost}:{webhookPort}'
+    protocol: https
+    description: |
+      The bot's own HTTPS endpoint that Telegram POSTs Update objects to
+      after `setWebhook` has been configured. Only ports 443, 80, 88, and
+      8443 are accepted by Telegram for webhook delivery.
+    variables:
+      webhookHost:
+        description: The public HTTPS host of the bot's webhook receiver.
+        default: bot.example.com
+      webhookPort:
+        description: TCP port accepted by Telegram for webhook delivery.
+        enum:
+          - '443'
+          - '80'
+          - '88'
+          - '8443'
+        default: '443'
+    security:
+      - secretToken: []
+
+channels:
+  /bot{token}/getUpdates:
+    description: |
+      HTTPS long-poll channel. The bot SUBSCRIBES (sends an HTTPS request)
+      to fetch a batch of pending Update objects. The connection is held
+      open for up to `timeout` seconds. The server replies with a JSON
+      object containing `ok: true` and a `result` array of Update objects.
+
+      Per the Telegram Bot API docs, this method will not work as long as
+      an outgoing webhook is set up.
+    parameters:
+      token:
+        description: |
+          The bot's authentication token issued by @BotFather, in the form
+          `<bot_id>:<auth_token>`. Used as a path segment.
+        schema:
+          type: string
+          pattern: '^[0-9]+:[A-Za-z0-9_-]+$'
+    bindings:
+      http:
+        type: request
+        method: POST
+        query:
+          type: object
+          properties:
+            offset:
+              type: integer
+              description: |
+                Identifier of the first update to be returned. Must be
+                greater by one than the highest among the identifiers of
+                previously received updates. By default, updates starting
+                with the earliest unconfirmed update are returned.
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 100
+              description: Limits the number of updates to be retrieved.
+            timeout:
+              type: integer
+              minimum: 0
+              default: 0
+              description: |
+                Timeout in seconds for long polling. Defaults to 0
+                (short polling). Should be positive in production.
+            allowed_updates:
+              type: array
+              items:
+                type: string
+              description: |
+                JSON-serialized list of the update types the bot wants to
+                receive. An empty list means receive all update types
+                except chat_member, message_reaction, and
+                message_reaction_count.
+    subscribe:
+      operationId: getUpdates
+      summary: Long-poll for pending updates.
+      description: |
+        Bot-initiated HTTPS request that returns an array of Update objects.
+        The HTTP connection is kept open for up to `timeout` seconds until
+        new updates are available.
+      message:
+        oneOf:
+          - $ref: '#/components/messages/GetUpdatesResponse'
+
+  /webhook:
+    description: |
+      HTTPS webhook channel. After `setWebhook` is called with a valid
+      HTTPS URL, Telegram delivers each Update by POSTing a single
+      JSON-serialized Update object to the bot. A reasonable amount of
+      retries is performed for HTTP error responses.
+    bindings:
+      http:
+        type: request
+        method: POST
+        headers:
+          type: object
+          properties:
+            Content-Type:
+              type: string
+              const: application/json
+            X-Telegram-Bot-Api-Secret-Token:
+              type: string
+              minLength: 1
+              maxLength: 256
+              pattern: '^[A-Za-z0-9_-]+$'
+              description: |
+                Optional secret token configured via setWebhook's
+                `secret_token` parameter. Allows the bot to verify that
+                the request comes from Telegram.
+    publish:
+      operationId: receiveWebhookUpdate
+      summary: Receive a single Update via HTTPS POST.
+      description: |
+        Telegram-initiated HTTPS POST containing a JSON-serialized Update
+        object. The bot SHOULD respond with HTTP 200 quickly. Non-2xx
+        responses cause Telegram to retry delivery.
+      message:
+        oneOf:
+          - $ref: '#/components/messages/WebhookUpdate'
+
+components:
+  securitySchemes:
+    botToken:
+      type: apiKey
+      in: user
+      description: |
+        Telegram bot token in the form `<bot_id>:<auth_token>` issued by
+        @BotFather. Passed as a path segment of every Bot API request.
+    secretToken:
+      type: httpApiKey
+      in: header
+      name: X-Telegram-Bot-Api-Secret-Token
+      description: |
+        Optional secret token (1-256 chars, A-Z a-z 0-9 _ and -) supplied
+        to `setWebhook` and echoed by Telegram on each webhook delivery.
+
+  messages:
+    GetUpdatesResponse:
+      name: GetUpdatesResponse
+      title: Long-poll response containing an array of Update objects.
+      contentType: application/json
+      summary: Successful response body from `getUpdates`.
+      payload:
+        $ref: '#/components/schemas/GetUpdatesResponseBody'
+
+    WebhookUpdate:
+      name: WebhookUpdate
+      title: Single Update object delivered by Telegram to the bot webhook.
+      contentType: application/json
+      summary: HTTPS POST body sent by Telegram for each new event.
+      headers:
+        type: object
+        properties:
+          X-Telegram-Bot-Api-Secret-Token:
+            type: string
+            description: |
+              Echoes the `secret_token` set via setWebhook. Present only
+              when secret_token was configured.
+      payload:
+        $ref: '#/components/schemas/Update'
+
+  schemas:
+    GetUpdatesResponseBody:
+      type: object
+      description: |
+        Standard Telegram Bot API response envelope wrapping the array of
+        Update objects returned by `getUpdates`.
+      required:
+        - ok
+        - result
+      properties:
+        ok:
+          type: boolean
+          description: True on success.
+        result:
+          type: array
+          description: Array of Update objects.
+          items:
+            $ref: '#/components/schemas/Update'
+
+    Update:
+      type: object
+      description: |
+        This object represents an incoming update. At most ONE of the
+        optional parameters can be present in any given update.
+      required:
+        - update_id
+      properties:
+        update_id:
+          type: integer
+          format: int64
+          description: |
+            The update's unique identifier. Update identifiers start from
+            a certain positive number and increase sequentially.
+        message:
+          allOf:
+            - $ref: '#/components/schemas/Message'
+          description: |
+            Optional. New incoming message of any kind - text, photo,
+            sticker, etc.
+        edited_message:
+          allOf:
+            - $ref: '#/components/schemas/Message'
+          description: |
+            Optional. New version of a message that is known to the bot
+            and was edited.
+        channel_post:
+          allOf:
+            - $ref: '#/components/schemas/Message'
+          description: |
+            Optional. New incoming channel post of any kind - text, photo,
+            sticker, etc.
+        edited_channel_post:
+          allOf:
+            - $ref: '#/components/schemas/Message'
+          description: |
+            Optional. New version of a channel post that is known to the
+            bot and was edited.
+        business_connection:
+          allOf:
+            - $ref: '#/components/schemas/BusinessConnection'
+          description: |
+            Optional. The bot was connected to or disconnected from a
+            business account, or a user edited an existing connection
+            with the bot.
+        business_message:
+          allOf:
+            - $ref: '#/components/schemas/Message'
+          description: |
+            Optional. New message from a connected business account.
+        edited_business_message:
+          allOf:
+            - $ref: '#/components/schemas/Message'
+          description: |
+            Optional. New version of a message from a connected business
+            account.
+        deleted_business_messages:
+          allOf:
+            - $ref: '#/components/schemas/BusinessMessagesDeleted'
+          description: |
+            Optional. Messages were deleted from a connected business
+            account.
+        message_reaction:
+          allOf:
+            - $ref: '#/components/schemas/MessageReactionUpdated'
+          description: |
+            Optional. A reaction to a message was changed by a user. The
+            bot must be an administrator in the chat and must explicitly
+            specify `message_reaction` in the list of allowed_updates.
+        message_reaction_count:
+          allOf:
+            - $ref: '#/components/schemas/MessageReactionCountUpdated'
+          description: |
+            Optional. Reactions to a message with anonymous reactions
+            were changed. Requires admin rights and explicit
+            allowed_updates listing.
+        inline_query:
+          allOf:
+            - $ref: '#/components/schemas/InlineQuery'
+          description: Optional. New incoming inline query.
+        chosen_inline_result:
+          allOf:
+            - $ref: '#/components/schemas/ChosenInlineResult'
+          description: |
+            Optional. The result of an inline query that was chosen by a
+            user and sent to their chat partner.
+        callback_query:
+          allOf:
+            - $ref: '#/components/schemas/CallbackQuery'
+          description: Optional. New incoming callback query.
+        shipping_query:
+          allOf:
+            - $ref: '#/components/schemas/ShippingQuery'
+          description: |
+            Optional. New incoming shipping query. Only for invoices with
+            flexible price.
+        pre_checkout_query:
+          allOf:
+            - $ref: '#/components/schemas/PreCheckoutQuery'
+          description: |
+            Optional. New incoming pre-checkout query. Contains full
+            information about checkout.
+        purchased_paid_media:
+          allOf:
+            - $ref: '#/components/schemas/PaidMediaPurchased'
+          description: |
+            Optional. A user purchased paid media with a non-empty
+            payload sent by the bot in a non-channel chat.
+        poll:
+          allOf:
+            - $ref: '#/components/schemas/Poll'
+          description: |
+            Optional. New poll state. Bots receive only updates about
+            manually stopped polls and polls sent by the bot.
+        poll_answer:
+          allOf:
+            - $ref: '#/components/schemas/PollAnswer'
+          description: |
+            Optional. A user changed their answer in a non-anonymous
+            poll. Bots receive new votes only in polls sent by the bot.
+        my_chat_member:
+          allOf:
+            - $ref: '#/components/schemas/ChatMemberUpdated'
+          description: |
+            Optional. The bot's chat member status was updated in a
+            chat. For private chats, this update is received only when
+            the bot is blocked or unblocked by the user.
+        chat_member:
+          allOf:
+            - $ref: '#/components/schemas/ChatMemberUpdated'
+          description: |
+            Optional. A chat member's status was updated in a chat.
+            Requires admin rights and explicit allowed_updates listing.
+        chat_join_request:
+          allOf:
+            - $ref: '#/components/schemas/ChatJoinRequest'
+          description: |
+            Optional. A request to join the chat has been sent. The bot
+            must have can_invite_users admin right.
+        chat_boost:
+          allOf:
+            - $ref: '#/components/schemas/ChatBoostUpdated'
+          description: Optional. A chat boost was added or changed.
+        removed_chat_boost:
+          allOf:
+            - $ref: '#/components/schemas/ChatBoostRemoved'
+          description: Optional. A boost was removed from a chat.
+
+    # The following referenced types are kept as opaque objects.
+    # Their full structure is defined in the Telegram Bot API
+    # documentation at https://core.telegram.org/bots/api and is not
+    # duplicated here to avoid drift. Bots SHOULD parse each value per
+    # the official documentation for the type named in `x-telegram-type`.
+
+    Message:
+      type: object
+      description: |
+        This object represents a message. See the full field list at
+        https://core.telegram.org/bots/api#message
+      x-telegram-type: Message
+      x-telegram-doc: https://core.telegram.org/bots/api#message
+      additionalProperties: true
+
+    BusinessConnection:
+      type: object
+      description: |
+        Describes the connection of the bot with a business account.
+        See https://core.telegram.org/bots/api#businessconnection
+      x-telegram-type: BusinessConnection
+      x-telegram-doc: https://core.telegram.org/bots/api#businessconnection
+      additionalProperties: true
+
+    BusinessMessagesDeleted:
+      type: object
+      description: |
+        Received when messages are deleted from a connected business
+        account. See
+        https://core.telegram.org/bots/api#businessmessagesdeleted
+      x-telegram-type: BusinessMessagesDeleted
+      x-telegram-doc: https://core.telegram.org/bots/api#businessmessagesdeleted
+      additionalProperties: true
+
+    MessageReactionUpdated:
+      type: object
+      description: |
+        This object represents a change of a reaction on a message
+        performed by a user. See
+        https://core.telegram.org/bots/api#messagereactionupdated
+      x-telegram-type: MessageReactionUpdated
+      x-telegram-doc: https://core.telegram.org/bots/api#messagereactionupdated
+      additionalProperties: true
+
+    MessageReactionCountUpdated:
+      type: object
+      description: |
+        This object represents reaction changes on a message with
+        anonymous reactions. See
+        https://core.telegram.org/bots/api#messagereactioncountupdated
+      x-telegram-type: MessageReactionCountUpdated
+      x-telegram-doc: https://core.telegram.org/bots/api#messagereactioncountupdated
+      additionalProperties: true
+
+    InlineQuery:
+      type: object
+      description: |
+        This object represents an incoming inline query. See
+        https://core.telegram.org/bots/api#inlinequery
+      x-telegram-type: InlineQuery
+      x-telegram-doc: https://core.telegram.org/bots/api#inlinequery
+      additionalProperties: true
+
+    ChosenInlineResult:
+      type: object
+      description: |
+        Represents a result of an inline query that was chosen by the
+        user and sent to their chat partner. See
+        https://core.telegram.org/bots/api#choseninlineresult
+      x-telegram-type: ChosenInlineResult
+      x-telegram-doc: https://core.telegram.org/bots/api#choseninlineresult
+      additionalProperties: true
+
+    CallbackQuery:
+      type: object
+      description: |
+        This object represents an incoming callback query from a
+        callback button in an inline keyboard. See
+        https://core.telegram.org/bots/api#callbackquery
+      x-telegram-type: CallbackQuery
+      x-telegram-doc: https://core.telegram.org/bots/api#callbackquery
+      additionalProperties: true
+
+    ShippingQuery:
+      type: object
+      description: |
+        This object contains information about an incoming shipping
+        query. See https://core.telegram.org/bots/api#shippingquery
+      x-telegram-type: ShippingQuery
+      x-telegram-doc: https://core.telegram.org/bots/api#shippingquery
+      additionalProperties: true
+
+    PreCheckoutQuery:
+      type: object
+      description: |
+        This object contains information about an incoming pre-checkout
+        query. See https://core.telegram.org/bots/api#precheckoutquery
+      x-telegram-type: PreCheckoutQuery
+      x-telegram-doc: https://core.telegram.org/bots/api#precheckoutquery
+      additionalProperties: true
+
+    PaidMediaPurchased:
+      type: object
+      description: |
+        This object contains information about a paid media purchase.
+        See https://core.telegram.org/bots/api#paidmediapurchased
+      x-telegram-type: PaidMediaPurchased
+      x-telegram-doc: https://core.telegram.org/bots/api#paidmediapurchased
+      additionalProperties: true
+
+    Poll:
+      type: object
+      description: |
+        This object contains information about a poll. See
+        https://core.telegram.org/bots/api#poll
+      x-telegram-type: Poll
+      x-telegram-doc: https://core.telegram.org/bots/api#poll
+      additionalProperties: true
+
+    PollAnswer:
+      type: object
+      description: |
+        This object represents an answer of a user in a non-anonymous
+        poll. See https://core.telegram.org/bots/api#pollanswer
+      x-telegram-type: PollAnswer
+      x-telegram-doc: https://core.telegram.org/bots/api#pollanswer
+      additionalProperties: true
+
+    ChatMemberUpdated:
+      type: object
+      description: |
+        This object represents changes in the status of a chat member.
+        See https://core.telegram.org/bots/api#chatmemberupdated
+      x-telegram-type: ChatMemberUpdated
+      x-telegram-doc: https://core.telegram.org/bots/api#chatmemberupdated
+      additionalProperties: true
+
+    ChatJoinRequest:
+      type: object
+      description: |
+        Represents a join request sent to a chat. See
+        https://core.telegram.org/bots/api#chatjoinrequest
+      x-telegram-type: ChatJoinRequest
+      x-telegram-doc: https://core.telegram.org/bots/api#chatjoinrequest
+      additionalProperties: true
+
+    ChatBoostUpdated:
+      type: object
+      description: |
+        This object represents a boost added to a chat or changed. See
+        https://core.telegram.org/bots/api#chatboostupdated
+      x-telegram-type: ChatBoostUpdated
+      x-telegram-doc: https://core.telegram.org/bots/api#chatboostupdated
+      additionalProperties: true
+
+    ChatBoostRemoved:
+      type: object
+      description: |
+        This object represents a boost removed from a chat. See
+        https://core.telegram.org/bots/api#chatboostremoved
+      x-telegram-type: ChatBoostRemoved
+      x-telegram-doc: https://core.telegram.org/bots/api#chatboostremoved
+      additionalProperties: true
+
+  parameters: {}
+
+x-telegram:
+  long-poll-method:
+    name: getUpdates
+    http:
+      method: POST
+      url-template: https://api.telegram.org/bot{token}/getUpdates
+    parameters:
+      offset:
+        type: integer
+        required: false
+        description: |
+          Identifier of the first update to be returned. Must be greater
+          by one than the highest among the identifiers of previously
+          received updates. An update is considered confirmed as soon as
+          getUpdates is called with an offset higher than its update_id.
+      limit:
+        type: integer
+        required: false
+        minimum: 1
+        maximum: 100
+        default: 100
+        description: |
+          Limits the number of updates to be retrieved. Values between
+          1-100 are accepted.
+      timeout:
+        type: integer
+        required: false
+        minimum: 0
+        default: 0
+        description: |
+          Timeout in seconds for long polling. Defaults to 0 (i.e. usual
+          short polling). Should be positive, short polling should be
+          used for testing purposes only.
+      allowed_updates:
+        type: array
+        items: string
+        required: false
+        description: |
+          A JSON-serialized list of the update types you want your bot
+          to receive. Specify an empty list to receive all update types
+          except chat_member, message_reaction, and
+          message_reaction_count.
+    notes: |
+      Will not work if an outgoing webhook is set up. In order to avoid
+      getting duplicate updates, recalculate offset after each server
+      response.
+
+  webhook-method:
+    name: setWebhook
+    http:
+      method: POST
+      url-template: https://api.telegram.org/bot{token}/setWebhook
+    delivery:
+      method: POST
+      content-type: application/json
+      payload: A single JSON-serialized Update object per request.
+      retry: |
+        A reasonable amount of attempts is made for HTTP error
+        responses. Use drop_pending_updates to discard queued updates.
+    parameters:
+      url:
+        type: string
+        required: true
+        description: |
+          HTTPS URL to send updates to. Use an empty string to remove
+          webhook integration.
+      certificate:
+        type: InputFile
+        required: false
+        description: |
+          Upload your public key certificate so that the root
+          certificate in use can be checked. See self-signed guide for
+          details.
+      ip_address:
+        type: string
+        required: false
+        description: |
+          The fixed IP address which will be used to send webhook
+          requests instead of the IP address resolved through DNS.
+      max_connections:
+        type: integer
+        required: false
+        minimum: 1
+        maximum: 100
+        default: 40
+        description: |
+          The maximum allowed number of simultaneous HTTPS connections
+          to the webhook for update delivery, 1-100. Defaults to 40.
+      allowed_updates:
+        type: array
+        items: string
+        required: false
+        description: |
+          A JSON-serialized list of the update types you want your bot
+          to receive. Specify an empty list to receive all update types
+          except chat_member, message_reaction, and
+          message_reaction_count.
+      drop_pending_updates:
+        type: boolean
+        required: false
+        description: Pass True to drop all pending updates.
+      secret_token:
+        type: string
+        required: false
+        minLength: 1
+        maxLength: 256
+        pattern: '^[A-Za-z0-9_-]+$'
+        description: |
+          A secret token to be sent in a header
+          "X-Telegram-Bot-Api-Secret-Token" in every webhook request,
+          1-256 characters. Only characters A-Z, a-z, 0-9, _ and - are
+          allowed.
+    supported-ports:
+      - 443
+      - 80
+      - 88
+      - 8443
+    notes: |
+      You will not be able to receive updates using getUpdates for as
+      long as an outgoing webhook is set up.
