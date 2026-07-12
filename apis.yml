@@ -30,10 +30,14 @@ apis:
           surface: HTTPS long-poll via getUpdates and HTTPS webhook
           delivery via setWebhook, with all 23 documented Update fields.
 common:
+  - type: DomainSecurity
+    url: security/telegram-bot-domain-security.yml
   - type: Website
     url: https://core.telegram.org/bots/api
   - type: PublicAPIsListing
     url: https://github.com/public-apis/public-apis
+  - url: https://telegram.org/blog
+    type: Blog
 maintainers:
   - FN: Kin Lane
     email: kin@apievangelist.com
