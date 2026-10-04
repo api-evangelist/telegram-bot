@@ -39,7 +39,6 @@ apis:
   - name: Telegram Bot
     description: "Simplified HTTP version of the MTProto API for bots"
     humanURL: https://core.telegram.org/bots/api
-    baseURL: https://core.telegram.org/bots/api
     tags:
       - Social
     properties:
